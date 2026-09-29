@@ -210,7 +210,7 @@ ssize_t send(int fd, const void *buf, size_t len, int flags);
     + 커널의 TCP 수신 버퍼에 데이터가 도착할 때까지 대기(블로킹)
     + 데이터가 도착하면 최대 count만큼 사용자 버퍼로 복사
 + 반환값:
-    + > 0: 성공적으로 읽어온 바이트 수
+    + 0 < : 성공적으로 읽어온 바이트 수
     + 0: 상대방(서버)이 연결을 종료함 (EOF) / 서버가 close()를 호출해 FIN 패킷을 보낸 경우 0을 반환
     + -1: 읽기 실패(에러)
 
@@ -218,25 +218,123 @@ ssize_t send(int fd, const void *buf, size_t len, int flags);
 + 커널이 클라이언트에게 FIN 패킷을 전송하며 TCP 4-Way Handshake 종료 절차 진행
 + FIN 송신 후 연결은 __FIN_WAIT_1 -> FIN_WAIT_2 -> TIME_WAIT__ 상태를 거쳐 정리됨
 
+## TCP 헤더 구조
+
+<p align="center">
+    <img width="546" height="320" alt="image" src="https://github.com/user-attachments/assets/da190cfc-4046-4af8-9512-0e9e9ac0363f" />
+</p>
+
++ Sourse/Destination Port Number (각 16 비트)
+    + Socket Address => IP Address + Port Address
+
++ Sequence Number (32 비트)
+    + `SYN` flag = 1 : __초기 순서 번호 (ISN, Initial Sequence Number)__ 으로 사용 => 난수 
+    + `SYN` flag = 1 : 바이트 단위로 구분되어 순서화되는 번호 => 임의 값으로 시작, 최대값(2^32) 이후 `0`부터 시작함
+
++ Acknowledgement Number (확인응답 번호 / 승인 번호) (32 비트)
+    + <img width="313" height="124" alt="image" src="https://github.com/user-attachments/assets/3ad25d69-b936-4e4c-9bcc-6fdcf88612d6" />
+    + `ACK` flag = 1으로 설정된 경우, 수신하기를 기대하는 다음 sequence number => 마지막 수신 성공한 __순서번호 + 1__ 
+    + 송신 메세지가 정상 수신되었음을, 수신측에서 송신측으로 확인응답하는 것
+
++ 헤더 길이 필드 (Header length, HLEN, 4 비트)
+    + TCP 헤더 길이를 4bytes (32bits) 단위로 표시
+    + 범위: 20bytes ~ 60bytes => 5 ~ 2^4 - 1
+
++ 예약 비트 (Reserved, 3~6bits)
+    + 프로토콜 확장을 위해 남겨둔 예비 비트, 일반적으로 0
+      
++ 제어 플래그 Flag bits (URG, ACK, PSH, RST, SYN, FIN)
+    + `URG`(Urgent): 긴급 데이터가 포함되어 있음을 표시 => Urgent Pointer 필드에 값이 채워져있음을 알림
+    + `ACK`(Acknowledgment): 확인 응답 번호 필드에 유효한 값이 들어있음을 표시
+        +  __SYN 세그먼트__ 송신 이후 항상 모든 세그먼트는 __1__ 유지
+    + `PSH`(Push): 수신 측에게 버퍼가 찰 때까지 기다리지 말고 데이터를 즉시 응용프로그램에 전달하도록 요청
+    + `RST`(Reset): 연결에 문제가 있어 강제로 연결을 초기화 하고자 할 때
+        + LISTEN,SYN_RCVD 상태일때 => RST 수신한 경우에 => LISTEN 상태로 들어감
+        + 그밖의 상태 일때 => RST 수신한 경우에 => 연결 끓고 CLOSED 상태로 들어감
+    + `SYN`(Synchronize): 연결을 시작할 때 초기 시퀀스 번호를 동기화하기 위해 (3-Way Handshake 시작)
+    + `FIN`(Finish): 데이터 전송이 완료되어 정상적으로 연결을 종료하고 싶을 때
+
++ 윈도우 크기 (Window size, 16 비트)
+    + TCP 흐름제어를 위해 송신자에게 자신의 수신 버퍼 여유용량 크기를 지속적으로 통보
+
++ Urgent pointer (16 비트)
+    + 현재 일련번호(sequence number)로부터 긴급 데이터까지의  바이트 오프셋(offset) 
+
 
 ## 연결형 서비스
++ TCP 연결 설정
+    + 연결요청  : SYN=1, ACK=0   (SYN 세그먼트)
+    + 연결허락  : SYN=1, ACK=1   (SYN+ACK 세그먼트)
+    + 연결설정  : ACK=1          (ACK 세그먼트)
+
++ TCP 연결 종료
+    + 종결요청 : FIN=1           (FIN 세그먼트)
+    + 종결응답 : FIN=1, ACK=1    (FIN+ACK 세그먼트)
+
 ### TCP 연결 설정 -> 3-Way Handshake
++ 연결이 시작됨과 옵션이 교환됐음을 알림
++ ISN(랜덤한 초기 순서번호)를 생성하고 교환했음을 알림
+
 <p align="center">
-    <img width="591" height="390" alt="image" src="https://github.com/user-attachments/assets/31a35d35-9356-476e-92d7-4b6ba32f172b" />
+    <img width="584" height="292" alt="image" src="https://github.com/user-attachments/assets/937a9e20-f177-4fe3-8dee-e3b3e74def4d" />
 </p>
 
-+ 첫번째 단계 (SYN)
-    + 클라이언트가 서버로 연결 요청를 송신
-    + __SYN(Synchronize)__ 플래그와 임의의 시작 번호 __Seq=x__를 전송
-    + 클라이언트 상태는 SYN_SENT로 바뀜
+1. **1단계: SYN (Synchronize)**
+   - **행동**: 클라이언트가 서버에 연결 요청 메시지를 송신
+   - **데이터**: TCP 헤더의 `SYN` 플래그를 `1`로 설정하고, 임의의 시퀀스 번호(`seq: x`)를 생성
+   - **상태**: 클라이언트는 `SYN-SENT` 상태가 되고, 서버는 `SYN-RECEIVED` 상태로 전환됩니다.
 
-+ 두번쩨 딘계 (SYN-ACK)
-    + 서버가 클라이언트의 요청을 받고 수락 응답을 송신
-    + 요청을 수락한다는 Ack(x+1)와 
+2. **2단계: SYN-ACK (Synchronize-Acknowledgment)**
+   - **행동**: 서버가 클라이언트의 요청을 받고, 연결을 수락함과 동시에 자신도 클라이언트와 연결하겠다는 요청을 함께 송신
+   - **데이터**: `SYN`과 `ACK` 플래그를 모두 `1`로 설정합니다.
+     - 클라이언트의 시퀀스 번호에 `1`을 더한 확인 응답 번호(`ack: x + 1`)
+     - 서버가 생성한 시퀀스 번호(`seq: y`)
+
+3. **3단계: ACK (Acknowledgment)**
+   - **행동**: 클라이언트가 서버의 응답을 확인하고 최종적으로 연결이 완료되었음을 알림
+   - **데이터**: `ACK` 플래그를 `1`로 설정하고, 서버의 시퀀스 번호에 `1`을 더한 확인 응답 번호(`ack: y + 1`) 성신
+   - **결과**: 이 단계가 완료되면 클라이언트와 서버 모두 `ESTABLISHED` 상태가 되어 데이터를 송수신할 수 있음
 
 ### TCP 연결 해제 설정 -> 4-Way Handshake
++ 정상 종료인 경우에, TCP 연결 종료는, 양방향 2개 연결을 각 측이 독립적으로 닫게 됨
+
++ TCP 연결 종료 구분
+    + 정상 종료 (Normal Close) : `4-Way Handshake`에 의해 양방향 모두 종료
+    + 반 종료 (Half Close) : 양측이 동시에 회선 종료 않고, 한쪽 연결이 열린채로 놔두고 종료
+    + 동시 종료 (Simultaneous Close): 거의 동시에 양측에서 FIN 세그먼트를 보내는 경우
+    + TCP Reset 요구(RESET 세그먼트) 기능
+
 <p align="center">
-<img width="506" height="391" alt="image" src="https://github.com/user-attachments/assets/f1f0b0cd-16b6-48a0-b243-450aa8c949c1" />
+    <img width="511" height="462" alt="image" src="https://github.com/user-attachments/assets/dc084d90-1064-4f4c-89c6-0ec762982dd2" />
 </p>
 
+1. **1단계: FIN (Finish)**
+   - **행동**: 클라이언트가 서버에 연결 종료 요청 메시지를 전송함
+   - **데이터**: TCP 헤더의 `FIN` 플래그를 `1`로 설정하고, 연결된 상태에서 마지막 시퀀스 번호보다 `1` 큰 시퀀스 번호(`seq: K`)를 전송함
+   - **확인 응답 번호**: 별도의 확인 응답 번호는 설정하지 않음
+   - **상태**: 클라이언트는 `FIN-WAIT-1` 상태로 전환됨
+
+2. **2단계: ACK (Acknowledgment)**
+   - **행동**: 서버가 클라이언트의 연결 종료 요청을 확인하고 응답함
+   - **데이터**: `ACK` 플래그를 `1`로 설정하고, 클라이언트의 시퀀스 번호에 `1`을 더한 확인 응답 번호(`ack: K + 1`)를 전송함
+     - 서버의 시퀀스 번호(`seq: L`) 포함됨
+   - **상태**
+     - 서버는 `CLOSE-WAIT` 상태로 전환됨
+     - 클라이언트는 `FIN-WAIT-2` 상태로 전환됨
+
+3. **3단계: FIN + ACK (Finish + Acknowledgment)**
+   - **행동**: 서버가 자신의 연결 종료를 알리고, 클라이언트의 `FIN` 세그먼트를 확인했다는 응답을 함께 전송함
+   - **데이터**: `FIN`과 `ACK` 플래그를 모두 `1`로 설정함
+     - 서버의 시퀀스 번호(`seq: L`) 전송함
+     - 클라이언트의 `FIN`에 대한 확인 응답 번호(`ack: K + 1`) 전송함
+   - **상태**: 서버는 `LAST-ACK` 상태로 전환됨
+
+4. **4단계: ACK (Acknowledgment)**
+   - **행동**: 클라이언트가 서버의 연결 종료 요청을 확인하고 최종 응답함
+   - **데이터**: `ACK` 플래그를 `1`로 설정하고, 서버의 시퀀스 번호에 `1`을 더한 확인 응답 번호(`ack: L + 1`)를 전송함
+   - **상태**
+     - 클라이언트는 `TIME-WAIT` 상태로 전환됨
+     - 일정 시간이 경과하면 `CLOSED` 상태로 전환됨
+     - 서버는 최종 `ACK` 수신 후 `CLOSED` 상태로 전환됨
+   - **결과**: 양단의 TCP 연결이 최종적으로 종료됨
 
