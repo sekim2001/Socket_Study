@@ -338,3 +338,8 @@ ssize_t send(int fd, const void *buf, size_t len, int flags);
      - 서버는 최종 `ACK` 수신 후 `CLOSED` 상태로 전환됨
    - **결과**: 양단의 TCP 연결이 최종적으로 종료됨
 
+
+---
+
+## 
+
