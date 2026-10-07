@@ -416,12 +416,12 @@ ssize_t send(int fd, const void *buf, size_t len, int flags);
 
 ### select/poll 과의 차이점
 
-    | 구분 | select/poll | epoll |
-    | :--- | :--- | :--- |
-    | FD 개수 제한 | select: 기본 1024개 제한 | 무제한 (시스템 자원 한도 내) |
-    | 커널 전달 방식 | 호출마다 전체 감시 FD 목록을 유저 -> 커널로 복사 | 최초 등록 시 커널에 1회만 등록 (epoll_ctl) |
-    | 자료 구조 | 단순 배열 / 비트마스크 | Red-Black Tree (감시 대상) + Double Linked List (준비 큐) |
-    | 복잡도 | 어떤 FD에서 이벤트가 발생했는지 확인을 위해 전체 루프 순회 | 이벤트가 발생한 FD 목록만 반환 |
+| 구분 | select/poll | epoll |
+| --- | --- | --- |
+| FD 개수 제한 | select: 기본 1024개 제한 | 무제한 (시스템 자원 한도 내) |
+| 커널 전달 방식 | 호출마다 전체 감시 FD 목록을 유저 -> 커널로 복사 | 최초 등록 시 커널에 1회만 등록 (epoll_ctl) |
+| 자료 구조 | 단순 배열 / 비트마스크 | Red-Black Tree (감시 대상) + Double Linked List (준비 큐) |
+| 복잡도 | 어떤 FD에서 이벤트가 발생했는지 확인을 위해 전체 루프 순회 | 이벤트가 발생한 FD 목록만 반환 |
 
 ### epoll 주요 시스템 콜 API
 
@@ -449,7 +449,7 @@ ssize_t send(int fd, const void *buf, size_t len, int flags);
     + `EPOLLIN`: 읽을 데이터가 들어옴 (listen 소켓의 경우 새 연결 요청 도착)
     + `EPOLLOUT`: 소켓 송신 버퍼에 공간이 생겨 쓰기가 가능해짐
     + `EPOLLET`: Edge-Triggered 모드로 동작 (기본값은 Level-Triggered)
-
+      
     ```c
     struct epoll_event ev;
     ev.events = EPOLLIN;
@@ -466,21 +466,21 @@ ssize_t send(int fd, const void *buf, size_t len, int flags);
 #### epoll_server.c 의 전체 종작 흐름
 
 1. 초기화 <br>
-    socket() -> bind() -> listen()
-    epoll_create1() 으로 epoll 인스턴스 생성
-    epoll_ctl(ADD) 로 server_fd (리슨 소켓)를 감시 목록에 등록
+    socket() -> bind() -> listen()<br>
+    epoll_create1() 으로 epoll 인스턴스 생성<br>
+    epoll_ctl(ADD) 로 server_fd (리슨 소켓)를 감시 목록에 등록<br>
 
 2. 이벤트 루트 <br>
-       epoll_wait() 호출 (이벤트 발생 시까지 대기)
-            │
-            ├─► [이벤트 발생한 FD 개수(nfds)만큼 for문 순회]
-            │
-            ├─► Case A: events[i].data.fd == server_fd (신규 접속)
-            │     - accept() 로 새 client_sock 획득
-            │     - epoll_ctl(ADD) 로 client_sock을 epoll 감시 목록에 등록 (EPOLLIN)
-            │
-            └─► Case B: events[i].data.fd == client_sock (기존 클라이언트 데이터)
-                  - read() 로 데이터 수신
-                  - if (read > 0)  : send() 로 응답 처리
-                  - if (read <= 0) : 클라이언트 종료 감지
-                                     epoll_ctl(DEL) 감시 해제 후 close(client_sock)
+       epoll_wait() 호출 (이벤트 발생 시까지 대기)<br>
+            │<br>
+            ├─► [이벤트 발생한 FD 개수(nfds)만큼 for문 순회]<br>
+            │<br>
+            ├─► Case A: events[i].data.fd == server_fd (신규 접속)<br>
+            │     - accept() 로 새 client_sock 획득<br>
+            │     - epoll_ctl(ADD) 로 client_sock을 epoll 감시 목록에 등록 (EPOLLIN)<br>
+            │<br>
+            └─► Case B: events[i].data.fd == client_sock (기존 클라이언트 데이터)<br>
+                  - read() 로 데이터 수신<br>
+                  - if (read > 0)  : send() 로 응답 처리<br>
+                  - if (read <= 0) : 클라이언트 종료 감지<br>
+                                     epoll_ctl(DEL) 감시 해제 후 close(client_sock)<br>
