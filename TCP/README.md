@@ -349,3 +349,138 @@ ssize_t send(int fd, const void *buf, size_t len, int flags);
 | calloc | 배열 형태 메모리 할당 | 개수와 크기를 받아 할당, 모든 비트를 `0`으로 자동 초기화 |
 | realloc | 메모리 크기 재할당 | 이미 할당된 메모리의 크기를 확장하거나 축소할 때 사용 |
 | free |  메모리 해제 | 힙 영역에 할당된 메모리를 시스템에 반환 (메모리 누수 방지) |
+
+---
+
+## 스레드 함수 (pthread.h)
+
++ pthread_create
+    ```C
+    int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine)(void*), void *arg);
+    ```
+    + 새로운 스레드를 생성하여 `start_routine` 함수를 실행, 인자 `arg`는 포인터 형태로 전달
+    + 성공 시 0를 반환하고, 생성된 스레드는 독립적인 흐름을 가짐
+
++ pthread_join
+    ```C
+    int pthread_join(pthread_t thread, void **retval);
+    ```
+    + 대상 스레드가 종료될 때까지 호출한 스레드가 __블로킹(대기)__ 하고, 스레드가 반환한 값 `retval`을 회수하고 관련 커널 자원을 정리
+    + 회수 하지 않은 자원은 메모리에 남아 좀비 스레드가 된다
+
++ pthread_detach 
+    ```C
+    int pthread_detach(pthread_t thread);
+    ```
+    + 스레드를 메인 스레드와 분리, 스레드 종료 시 즉시 운영체제가 자원을 즉시 자동 회수
+
++ pthread_exit 
+    ```C
+    void pthread_exit(void *retval);
+    ```
+    + 현재 실행 중인 스레드를 즉시 종료하고 반환값을 `retval`로 반환
+
++ pthread_self 
+    ```C
+    pthread_t pthread_self(void);
+    ```
+    + 현재 코드가 실행 중인 스레드의 고유 식별자 `pthread_t`를 반환
+
++ 여러 스레드가 공유 메모리(전역 변수, 큐 등)에 동시 접근할 때 데이터를 보호하기 위해 스레드 동기화(Mutex & Condition Variable) 사용
+
+---
+
+## signal(SIGPIPE, SIG_IGN);
+
++ 이미 연결이 끊어진 소켓에 write() 또는 send()를 시도하면 커널이 프로세스에 `SIGPIPE` 시그널을 전달하며 프로세스가 `비정상 종료` 될 수 있다
+
+### SIGPIPE의 발생 흐름과 방어 메커니즘
+
+1. 클라이언트가 강제 종료 되며 서버 커널에 FIN 또는 RST 도착
+2. 서버가 해당 소켓에 write() / send() 시도
+3. 클라이언트 OS 가 "받을 프로세스 없을"으로 RST 패킷 회신
+4. 끊어진 파이프/소켓에 데이터를 쓰러는 시도를 하여 커널이 서버 프로세스에 SIGPIPE 시그널 발송
+    
+    + [기본 동작] : 프로세스가 즉시 비정상 종료 (Terminate / Crash)
+        + 서버가 종료 되면서 다른 클라이언트 또한 통신이 불가능해짐
+    
+    + [signal(SIGPIPE, SIG_IGN)] : 시그널을 무시
+        + 서버 프로세스는 죽지 않고 write()/send()가 -1를 반환하고 errno에 `EPIPE` 설정
+
+--- 
+
+## epoll - I/O 멀티플렉싱(Multiplexing) 메커니즘
+
++ 서버의 멀티스레드/멀티프로세스 모델은 클라이언트당 하나의 스레드가 필요하므로 컨텍스트 스위칭 오버헤드와 메모리 낭비가 심함
++ epoll은 __단 하나의 스레드(프로세스)로__ 많은 소켓을 감시하고, I/O(읽기/쓰기/접속) 이벤트가 발생한 소켓만 처리함
+
+### select/poll 과의 차이점
+
+    | 구분 | select/poll | epoll |
+    | :--- | :--- | :--- |
+    | FD 개수 제한 | select: 기본 1024개 제한 | 무제한 (시스템 자원 한도 내) |
+    | 커널 전달 방식 | 호출마다 전체 감시 FD 목록을 유저 -> 커널로 복사 | 최초 등록 시 커널에 1회만 등록 (epoll_ctl) |
+    | 자료 구조 | 단순 배열 / 비트마스크 | Red-Black Tree (감시 대상) + Double Linked List (준비 큐) |
+    | 복잡도 | 어떤 FD에서 이벤트가 발생했는지 확인을 위해 전체 루프 순회 | 이벤트가 발생한 FD 목록만 반환 |
+
+### epoll 주요 시스템 콜 API
+
+#### epoll_create1(int flags)
+
++ epoll 인스턴스 (커널 내부 객체)를 생성하고 이를 가리키는 파일 디스크립터 (epoll_fd)를 반환
+
++ `flags`
+    + `0`
+        + defult 값으로 아무 플래그 없이 epoll 인스턴스 생성
+    + `EPOLL_COLEXEC`
+        + 새롭게 생성된 epoll 인스턴스의 FD에 `FD_CLOEXEC`(Close-on-exec) 프래그 설정
+        + execve() 같은 시스템 콜로 새로운 프로그램을 실행할 때 epoll FD를 자식 프로세스에게 상속하지 않고 종료
+
+#### epoll_ctl(int epfd, int op, int fd, struct epoll_event *event)
+
++ 감시할 FD을 등록, 수정, 삭제 
+
++ `op`옵션 
+    + `EPOLL_CTL_ADD` : 새 FD를 감시 목록에 추가
+    + `EPOLL_CTL_MOD` : 기존 FD의 감시 이벤트 변경
+    + `EPOLL_CTL_DEL` : 감시 목록에서 FD 제거
+
++ 주요 이벤트 플래그 (event.events)
+    + `EPOLLIN`: 읽을 데이터가 들어옴 (listen 소켓의 경우 새 연결 요청 도착)
+    + `EPOLLOUT`: 소켓 송신 버퍼에 공간이 생겨 쓰기가 가능해짐
+    + `EPOLLET`: Edge-Triggered 모드로 동작 (기본값은 Level-Triggered)
+
+    ```c
+    struct epoll_event ev;
+    ev.events = EPOLLIN;
+    ev.data.fd = server_fd;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev);
+    ```
+
+#### epoll_wait (int epfd, struct epoll_event *events, int maxevents, int timeout)
+
++ 등록된 FD 중 이벤트가 발생할 때까지 블로킹
++ 이벤트가 발생하면 커널이 events 배열에 발생한 FD(소켓) 정보를 채워주고, 발생한 이벤트의 총 개수(nfds)를 반환
++ `timeout` : `-1`이면 무한 대기, `0`이면 non-blocking, `양수`면 ms 단위 타임아웃
+
+#### epoll_server.c 의 전체 종작 흐름
+
+1. 초기화 <br>
+    socket() -> bind() -> listen()
+    epoll_create1() 으로 epoll 인스턴스 생성
+    epoll_ctl(ADD) 로 server_fd (리슨 소켓)를 감시 목록에 등록
+
+2. 이벤트 루트 <br>
+       epoll_wait() 호출 (이벤트 발생 시까지 대기)
+            │
+            ├─► [이벤트 발생한 FD 개수(nfds)만큼 for문 순회]
+            │
+            ├─► Case A: events[i].data.fd == server_fd (신규 접속)
+            │     - accept() 로 새 client_sock 획득
+            │     - epoll_ctl(ADD) 로 client_sock을 epoll 감시 목록에 등록 (EPOLLIN)
+            │
+            └─► Case B: events[i].data.fd == client_sock (기존 클라이언트 데이터)
+                  - read() 로 데이터 수신
+                  - if (read > 0)  : send() 로 응답 처리
+                  - if (read <= 0) : 클라이언트 종료 감지
+                                     epoll_ctl(DEL) 감시 해제 후 close(client_sock)

@@ -9,7 +9,6 @@
 int main() {
     int sock = 0;
     struct sockaddr_in serv_addr;
-    char *hello = "Hello from TCP Client";
     char buffer[1024] = {0};
 
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
@@ -29,13 +28,21 @@ int main() {
         printf("\nConnection Failed \n"); return -1;
     }
 
+    int index = 0;
+    char msg[1024]; 
 
-    sleep(10);
+    while (1)
+    {
+        sprintf(msg, "client Msg %d", index);
+        send(sock, msg, strlen(msg), 0);
+        printf("Message sent to server\n");
+        read(sock, buffer, 1024);
+        printf("Received from Server: %s\n", buffer);
+        sleep(1);
+        index ++;
+    }
 
-    send(sock, hello, strlen(hello), 0);
-    printf("Message sent to server\n");
-    read(sock, buffer, 1024);
-    printf("Received from Server: %s\n", buffer);
+
 
     close(sock);
     return 0;
