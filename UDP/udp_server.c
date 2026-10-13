@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 
-#define PORT 8080
+#define PORT 9090
 #define BUFFER_SIZE 1024
 
 int main() {
@@ -52,10 +52,10 @@ int main() {
 
         // 4. 수신한 주소(client_addr)로 에코(Echo) 응답 전송
         char reply[BUFFER_SIZE + 64];
-        snprintf(reply, sizeof(reply), "Echo from UDP Server: %s", buffer);
+        // snprintf(reply, sizeof(reply), "Echo from UDP Server: %s", buffer);
 
-        sendto(server_fd, reply, strlen(reply), 0,
-               (const struct sockaddr *)&client_addr, client_len);
+        // sendto(server_fd, reply, strlen(reply), 0,
+        //        (const struct sockaddr *)&client_addr, client_len);
     }
 
     close(server_fd);
